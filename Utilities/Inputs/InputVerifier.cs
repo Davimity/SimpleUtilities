@@ -1,7 +1,6 @@
 ﻿using System.Globalization;
 using System.Text.RegularExpressions;
-
-using SecureString = SimpleUtilities.Security.SecureInformation.Types.SecureString;
+using SecureString = SimpleUtilities.Security.SecureInformation.Types.Texts.SecureString;
 
 namespace SimpleUtilities.Utilities.Inputs
 {
@@ -11,8 +10,6 @@ namespace SimpleUtilities.Utilities.Inputs
 
             public static bool VerifyLength(string input, int minLength = 1, int maxLength = 100, bool allowWhiteSpaces = false, bool hasMinLength = true, bool hasMaxLength = true){
 
-                if (input == null) return false;
-
                 if(minLength < 0 && hasMinLength)
                     throw new ArgumentException("minLength must be greater than or equal to 0");
 
@@ -21,14 +18,10 @@ namespace SimpleUtilities.Utilities.Inputs
 
                 if (hasMinLength && input.Length < minLength || hasMaxLength && input.Length > maxLength) return false;
 
-                if (!allowWhiteSpaces && input.IndexOf(' ') != -1) return false;
-
-                return true;
+                return allowWhiteSpaces || input.IndexOf(' ') == -1;
             }
 
             public static bool VerifyLength(SecureString input, int minLength = 1, int maxLength = 100, bool allowWhiteSpaces = false, bool hasMinLength = true, bool hasMaxLength = true){
-
-                if (input is null) return false;
 
                 if (minLength < 0 && hasMinLength)
                     throw new ArgumentException("minLength must be greater than or equal to 0");
@@ -36,11 +29,9 @@ namespace SimpleUtilities.Utilities.Inputs
                 if (maxLength < 0 && hasMaxLength)
                     throw new ArgumentException("maxLength must be greater than or equal to 0");
 
-                if (hasMinLength && input.Length < minLength || hasMaxLength && input.Length > maxLength) return false;
+                if (hasMinLength && input.GetLength() < minLength || hasMaxLength && input.GetLength() > maxLength) return false;
 
-                if (!allowWhiteSpaces && input.IndexOf(' ') != -1) return false;
-
-                return true;
+                return allowWhiteSpaces || input.IndexOf(' ') == -1;
             }
 
             public static bool VerifyEmailFormat(string email){
@@ -50,7 +41,7 @@ namespace SimpleUtilities.Utilities.Inputs
 
                 try{
 
-                    email = Regex.Replace(email, @"(@)(.+)$", DomainMapper,
+                    email = Regex.Replace(email, "(@)(.+)$", DomainMapper,
                                           RegexOptions.None, TimeSpan.FromMilliseconds(200));
 
 

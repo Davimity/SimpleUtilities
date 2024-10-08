@@ -1,5 +1,3 @@
 ﻿namespace SimpleUtilities.Exceptions.SecurityExceptions.CryptographycExceptions{
-    public class AESEncryptException : CryptographycException{
-        public AESEncryptException(string message) : base(message) { }
-    }
+    public class AesEncryptException(string message) : CryptographycException(message){}
 }

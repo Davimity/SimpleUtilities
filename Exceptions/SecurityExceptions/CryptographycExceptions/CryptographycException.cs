@@ -1,7 +1,3 @@
-﻿using System;
-
-namespace SimpleUtilities.Exceptions.SecurityExceptions.CryptographycExceptions{
-    public class CryptographycException : Exception{
-        public CryptographycException(string message) : base(message) { }
-    }
+﻿namespace SimpleUtilities.Exceptions.SecurityExceptions.CryptographycExceptions{
+    public class CryptographycException(string message) : Exception(message){}
 }

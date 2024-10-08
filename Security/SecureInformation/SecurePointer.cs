@@ -1,81 +1,33 @@
-﻿using SimpleUtilities.Exceptions.SecurityExceptions;
-using SimpleUtilities.Security.Cryptography;
-using SimpleUtilities.Security.SecureInformation.Types;
-using SimpleUtilities.Threading;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
+using SimpleUtilities.Exceptions.SecurityExceptions;
 
-namespace SimpleUtilities.Security.SecureInformation
-{
-    public class SecurePointer<T> : IDisposable{
+using static SimpleUtilities.Security.SecureInformation.SecureData;
+using static SimpleUtilities.Threading.SimpleLock;
+
+namespace SimpleUtilities.Security.SecureInformation{
+    ///<summary>A pointer that stores data in a secure way.</summary>
+    ///<remarks>THREAD SAFE</remarks>
+    public class SecurePointer<T> : CryptographicElement, IDisposable{
 
         #region Variables
 
-            public delegate byte[] ClassArrayToBytes(T[] array, bool destroyArray);
-            public delegate T[] ClassBytesToArray(byte[] array, bool destroyArray);
+            private Memory<byte> data;
+            private Memory<byte> hash;
 
-            private IntPtr ptr;
-            private IntPtr hash;
+            private Memory<byte> key;
+            private Memory<byte> iv;
 
-            private int encryptedLength;
-            private int realLength;
+            private int length;
+            private bool isReadOnly;
 
-            private IntPtr keyPtr;
-            private IntPtr ivPtr;
+            private System.Timers.Timer? cacheTimer;
+            private T[]? cache;
 
-            private readonly object lockObject;
-
-            public ClassArrayToBytes? ArrayToBytesMethod;
-            public ClassBytesToArray? BytesToArrayMethod;
-
-        #endregion
-
-        #region Properties
-
-            public int Length{
-                get{
-                    using(new SimpleLock(lockObject)){
-                        return realLength;
-                    }
-                }
-            }
-
-            ///<summary> This property allows to get and set the data in the pointer. </summary>
-            ///<remarks> The input data won't be destroyed after the operation </remarks>
-            public T[] Data{
-                get{
-                    using (new SimpleLock(lockObject)){
-                        if (!CheckHash()) throw new InvalidDataHash("Data has been modified in a potentially malicious way.");
-                        return BytesToArray(ObtainData(ptr, encryptedLength));
-                    }
-                }
-
-                set{
-                    using (new SimpleLock(lockObject)){
-                        if (!CheckHash()) throw new InvalidDataHash("Data has been modified in a potentially malicious way.");
-
-                        AllocateMainData(ArrayToBytes(value, false));
-                    }
-                }
-            }
-
-            private byte[] Key{
-                get => ObtainData(keyPtr, 32, false);
-            }
-
-            private byte[] IV{
-                get => ObtainData(ivPtr, 16, false);
-            }
-
-            private byte[] Hash{
-                get{
-                    using(new SimpleLock(lockObject)){
-                        return ObtainData(hash, 64, false);
-                    }
-                }
-            }
+            private ClassArrayToBytes<T>? arrayToBytesMethod;
+            private ClassBytesToArray<T>? bytesToArrayMethod;
 
         #endregion
 
@@ -84,277 +36,308 @@ namespace SimpleUtilities.Security.SecureInformation
             ///<summary> Creates a new SecurePointer object.</summary>
             public SecurePointer(){
 
-                byte[] key = new byte[32];
-                byte[] iv = new byte[16];
+                GenerateKeyIv();
 
-                lockObject = new object();
-
-                using (var rng = RandomNumberGenerator.Create()){
-                    rng.GetBytes(key);
-                    rng.GetBytes(iv);
-                }
-
-                try{
-                    AllocateData(ref keyPtr, 0, key, encrypt: false, destroyArray: true);
-                    AllocateData(ref ivPtr, 0, iv, encrypt: false, destroyArray: true);
-                }
-                finally{
-                    SecureData.OverwriteArray(key, iv);
-                }
-
-                ptr = IntPtr.Zero;
-                hash = IntPtr.Zero;
-
-                encryptedLength = 0;
-                realLength = 0;
+                length = 0;
+                hash = new Memory<byte>(Sha512Instance.ComputeHash(data.ToArray()));
             }
 
             ///<summary> Creates a new SecurePointer object with the given data.</summary>
             ///<param name="data"> The data to store in the pointer </param>
+            ///<param name="arrayToBytesMethod"> The method to convert the array to bytes </param>
+            ///<param name="bytesToArrayMethod"> The method to convert the bytes to an array </param>
             ///<remarks> The input data won't be destroyed after the creation of the object </remarks>
-            public SecurePointer(T data) : this(){
-                AllocateMainData(ArrayToBytes(new[] { data }));
+            public SecurePointer(T data, ClassArrayToBytes<T>? arrayToBytesMethod = null, ClassBytesToArray<T>? bytesToArrayMethod = null) : this([data], arrayToBytesMethod, bytesToArrayMethod){
             }
 
             ///<summary> Creates a new SecurePointer object with the given data.</summary>
             ///<param name="data"> The data to store in the pointer </param>
+            ///<param name="arrayToBytesMethod"> The method to convert the array to bytes </param>
+            ///<param name="bytesToArrayMethod"> The method to convert the bytes to an array </param>
             ///<param name="destroyArray"> If true, the data array will be deleted from memory </param>
             ///<remarks> If the destroyArray parameter is set to true, the array will be destroyed after the creation of the object bute the objects in the array can persist in memory if another reference is pointing to them </remarks>
-            public SecurePointer(T[] data, bool destroyArray = true) : this(){
-                AllocateMainData(ArrayToBytes(data, destroyArray));
+            public SecurePointer(T[] data, ClassArrayToBytes<T>? arrayToBytesMethod = null, ClassBytesToArray<T>? bytesToArrayMethod = null, bool destroyArray = false) : this(){
+                SetData(data);
+
+                this.arrayToBytesMethod = arrayToBytesMethod;
+                this.bytesToArrayMethod = bytesToArrayMethod;
+
+                if (destroyArray) OverwriteArray(data);
             }
 
         #endregion
 
         #region Public methods
 
+            ///<summary> Make the SecurePointer read-only. This action cannot be undone, the SecurePointer will be read-only until it is disposed. </summary>
+            public void MakeReadOnly() {
+                Lock(this);
+                    isReadOnly = true;
+                Unlock(this);
+            }
+
+            ///<summary> Append the given d to the pointer </summary>
+            ///<param name="d"> The d to append </param>
+            ///<param name="destroyArray"> If true, the array will be destroyed after the operation </param>
+            public void Append(T[] d, bool destroyArray = false) {
+                if (isReadOnly) throw new InvalidOperationException("The array is read-only.");
+
+                Lock(this);
+
+                    var newData = new T[length + d.Length];
+
+                    Buffer.BlockCopy(GetData(), 0, newData, 0, length);
+
+                    #pragma warning disable CA2018
+
+                        Buffer.BlockCopy(d, 0, newData, length, d.Length);
+
+                    #pragma warning restore CA2018
+
+                    SetData(newData);
+    
+                Unlock(this);
+
+                OverwriteArray(newData);
+                
+                if(destroyArray) OverwriteArray(d);
+            }
+
+            public void Append(T d) {
+                if (isReadOnly) throw new InvalidOperationException("The array is read-only.");
+
+                Lock(this);
+
+                    var newData = new T[length + 1];
+
+                    Buffer.BlockCopy(GetData(), 0, newData, 0, length);
+                    newData[length] = d;
+
+                    SetData(newData);
+            
+                Unlock(this);
+
+                OverwriteArray(newData);
+            }
+
             ///<summary> Dispose the SecurePointer removing all data from memory. </summary>
             public void Dispose(){
-                using (new SimpleLock(lockObject)){
-                    DeleteData(ref ptr, encryptedLength);
-                    DeleteData(ref hash, 64);
-                    DeleteData(ref keyPtr, 32);
-                    DeleteData(ref ivPtr, 16);
+                Lock(this);
 
-                    encryptedLength = 0;
-                    realLength = 0;
-                }
+                    data.Span.Clear();
+
+                    key.Span.Clear();
+                    iv.Span.Clear();
+
+                    length = 0;
+
+                Unlock(this);
+
+                GC.SuppressFinalize(this);
             }
 
         #endregion
 
         #region Private methods
+            
+            private void GenerateKeyIv() {
+                var nkey = new byte[32];
+                var niv = new byte[16];
 
-            ///<summary> Modifies the data in the pointer deleting the old data from memory. </summary>
-            ///<param name="data"> The new data to store in the pointer </param>
-            ///<param name="encrypt"> If true, the data will be encrypted using the object Key and IV </param>
-            ///<param name="destroyArray"> If true, the data array will be deleted from memory </param>
-            private void AllocateMainData(byte[] data, bool encrypt = true, bool destroyArray = true){
-                using (new SimpleLock(lockObject)){
-                    if (!CheckHash()) throw new InvalidDataHash("Data has been modified in a potentially malicious way.");
-
-                    realLength = data.Length;
-                    encryptedLength = AllocateData(ref ptr, encryptedLength, data, encrypt, destroyArray);
-                    AllocateData(ref hash, 64, CalculateHash(), false);
+                using (var rng = RandomNumberGenerator.Create()) {
+                    rng.GetBytes(nkey);
+                    rng.GetBytes(niv);
                 }
+
+                key = new Memory<byte>(nkey);
+                iv = new Memory<byte>(niv);
             }
 
-            ///<summary> Modifies the data in the pointer deleting the old data from memory. </summary>
-            ///<param name="ptr"> The pointer to modify </param>
-            ///<param name="length"> The length of the data on the pointer before modifications</param>
-            ///<param name="data"> The new data to store in the pointer </param>
-            ///<param name="encrypt"> If true, the data will be encrypted using the object Key and IV </param>
-            ///<param name="destroyArray"> If true, the data array will be deleted from memory </param>
-            ///<returns> The length of the data </returns>
-            private int AllocateData(ref IntPtr ptr, int length, byte[] data, bool encrypt = true, bool destroyArray = true){
-
-                if (ptr != IntPtr.Zero) DeleteData(ref ptr, length);
-
-                if (encrypt){
-                    byte[] key = Key;
-                    byte[] iv = IV;
-
-                    byte[]? encrypted = null;
-
-                    try{
-                        encrypted = AES.AESEncrypt(data, key, iv);
-
-                        ptr = Marshal.AllocHGlobal(encrypted.Length);
-                        Marshal.Copy(encrypted, 0, ptr, encrypted.Length);
-
-                        return encrypted.Length;
-                    }
-                    finally{
-                        if(encrypted != null) SecureData.OverwriteArray(encrypted);
-                        SecureData.OverwriteArray(key, iv, data);
-                    }
+            private void StartCacheTimer(int interval = 1000) {
+                if (cacheTimer != null) {
+                    cacheTimer.Stop();
+                    cacheTimer.Dispose();
                 }
-                else{
-                    try{
-                        ptr = Marshal.AllocHGlobal(data.Length);
-                        Marshal.Copy(data, 0, ptr, data.Length);
 
-                        return data.Length;
-                    }
-                    finally{
-                       SecureData.OverwriteArray(data);
-                    }
- 
-                }
+                cacheTimer = new System.Timers.Timer(interval);
+                cacheTimer.Elapsed += (_, _) => ClearCache();
+                cacheTimer.AutoReset = false;
+                cacheTimer.Start();
             }
 
-            ///<summary> Deletes the data in the pointer and sets the pointer to IntPtr.Zero </summary>
-            ///<param name="ptr"> The pointer to delete </param>
-            private void DeleteData(ref IntPtr ptr, int length){
-                using (new SimpleLock(lockObject)){
-                    if (ptr == IntPtr.Zero) return;
+            private void ClearCache() {
+                Lock(this);
 
-                    Marshal.Copy(new byte[length], 0, ptr, length);
-                    Marshal.FreeHGlobal(ptr);
+                    if (cache == null) return;
+                    Array.Clear(cache, 0, cache.Length);
+                    cache = null;
 
-                    ptr = IntPtr.Zero;
-                }
+                Unlock(this);
             }
+         
+            private byte[] ArrayToBytes(T[] array, bool destroyArray = true) {
+                ArgumentNullException.ThrowIfNull(array, nameof(array));
 
-            ///<summary> Obtains the data from the pointer </summary>
-            ///<param name="ptr"> The pointer to obtain the data from </param>
-            ///<param name="length"> The length of the data </param>
-            ///<param name="isEncrypted"> If true, the data will be decrypted </param>
-            private byte[] ObtainData(IntPtr ptr, int length, bool isEncrypted = true){
-                using (new SimpleLock(lockObject)){
-                    if (ptr == IntPtr.Zero) throw new NullReferenceException("Pointer is null");
-                    if (length <= 0) throw new ArgumentOutOfRangeException("Length must be greater than 0");
-
-                    byte[] data = new byte[length];
-                    Marshal.Copy(ptr, data, 0, length);
-
-                    if (isEncrypted){
-                        byte[] key = ObtainData(keyPtr, 32, false);
-                        byte[] iv = ObtainData(ivPtr, 16, false);
-
-                        try{
-                            byte[] decrypted = AES.AESDecrypt(data, key, iv);
-                            return decrypted;
-                        }
-                        finally{
-                            SecureData.OverwriteArray(key, iv, data);
-                        }
-                    }
-
-                    return data;
-                }
-            }
-
-            ///<summary> Check if the saved hash is equal to the hash of the data </summary>
-            ///<returns> True if the hashes are equal, false otherwise </returns>
-            private bool CheckHash(){
-
-                if (ptr == IntPtr.Zero && hash == IntPtr.Zero) return true;
-
-                byte[] savedHash = Hash;
-                byte[] calculatedHash = CalculateHash();
-
-                bool result = savedHash.SequenceEqual(calculatedHash);
-
-                SecureData.OverwriteArray(savedHash, calculatedHash);
-
-                return result;
-            }
-
-            ///<summary> Calculates the hash of the data </summary>
-            ///<returns> The hash of the data </returns>
-            private byte[] CalculateHash(){
-                byte[] bytes = ObtainData(ptr, encryptedLength, false);
-                byte[]? hash = null;
-                byte[] key = Key;
-
-                try{
-                    hash = SHA.SHA512HashSalt(bytes, key, true);
-                    return hash;
-                }finally{
-                    SecureData.OverwriteArray(bytes, key);
-                }
-            }
-
-            ///<summary> Converts an array of elements to a byte array. ONLY WORKS FOR PRIMITIVES AND STRINGS, IF YOU WANT TO CONVERT ANOTHER TYPE YOU MUST SET THE ArrayToBytesMethod DELEGATE </summary>
-            ///<param name="array"> The array to convert </param>
-            ///<param name="destroyArray"> If true, the array will be deleted from memory </param>
-            ///<remarks> If the destroyArray parameter is set to true, the array will be destroyed after the creation of the object bute the objects in the array can persist in memory if another reference is pointing to them </remarks>
-            private byte[] ArrayToBytes(T[] array, bool destroyArray = true){
-                if (array == null) throw new ArgumentNullException(nameof(array));
+                if (arrayToBytesMethod != null) return arrayToBytesMethod(array, destroyArray);
 
                 byte[] result;
-                Type elementType = typeof(T);
+                var elementType = typeof(T);
 
-                if (elementType.IsPrimitive){
-                    int size = Buffer.ByteLength(array);
-                    result = new byte[size];
-                    Buffer.BlockCopy(array, 0, result, 0, size);
+                if (elementType.IsPrimitive) {
+                    result = new byte[Buffer.ByteLength(array)];
+                    Buffer.BlockCopy(array, 0, result, 0, result.Length);
                 }
-                else if (elementType == typeof(string)){
+                else if (elementType == typeof(string)) {
+                    var realArray = array.Cast<string>().ToArray();
 
-                    string[] realArray = array.Cast<string>().ToArray();
+                    using (var ms = new MemoryStream()) {
+                        foreach (var s in realArray) {
+                            var bytes = Encoding.UTF8.GetBytes(s);
+                            ms.Write(bytes, 0, bytes.Length);
 
-                    int charSize = Encoding.UTF32.GetBytes(new[] { 'a' }).Length;
-                    int size = realArray.Sum(s => s.Length * charSize) + realArray.Length * charSize;
+                            var separatorBytes = Encoding.UTF8.GetBytes(['\0']);
+                            ms.Write(separatorBytes, 0, separatorBytes.Length);
+                        }
 
-                    result = new byte[size];
-
-                    int offset = 0;
-                    foreach (string s in realArray){
-                        byte[] bytes = Encoding.UTF32.GetBytes(s);
-                        Buffer.BlockCopy(bytes, 0, result, offset, bytes.Length);
-                        offset += bytes.Length;
-
-                        byte[] separatorBytes = Encoding.UTF32.GetBytes(new[] { '\0' });
-
-                        Buffer.BlockCopy(separatorBytes, 0, result, offset, separatorBytes.Length);
-                        offset += separatorBytes.Length;
+                        result = ms.ToArray();
                     }
                 }
-                else{
-
-                    if (ArrayToBytesMethod == null) throw new NullReferenceException("The ArrayToBytesMethod delegate is null. You must set it before using this method.");
-
-                    result = ArrayToBytesMethod(array, destroyArray);
+                else {
+                    throw new ArgumentNullException(nameof(arrayToBytesMethod), "Type not supported by default. Please provide a custom method for ArrayToBytes.");
                 }
 
-                if (destroyArray) SecureData.OverwriteArray(array);
+                if (destroyArray) OverwriteArray(array);
 
                 return result;
             }
 
-            ///<summary> Converts a byte array to an array of elements. ONLY WORKS FOR PRIMITIVES AND STRINGS, IF YOU WANT TO CONVERT ANOTHER TYPE YOU MUST SET THE BytesToArrayMethod DELEGATE </summary>
-            ///<param name="array"> The array to convert </param>
-            ///<param name="destroyArray"> If true, the array will be deleted from memory </param>
-            private T[] BytesToArray(byte[] array, bool destroyArray = true){
-                if (array == null) throw new ArgumentNullException(nameof(array));
+            private T[] BytesToArray(byte[] array, bool destroyArray = true) {
+                ArgumentNullException.ThrowIfNull(array, nameof(array));
 
-                Type elementType = typeof(T);
+                if (bytesToArrayMethod != null) return bytesToArrayMethod(array, destroyArray);
+
+                var elementType = typeof(T);
                 T[] result;
 
-                if (elementType.IsPrimitive){
-
-                    int length = array.Length / Marshal.SizeOf(elementType);
-
-                    result = new T[length];
+                if (elementType.IsPrimitive) {
+                    var l = array.Length / Marshal.SizeOf(elementType);
+                    result = new T[l];
                     Buffer.BlockCopy(array, 0, result, 0, array.Length);
                 }
-                else if (elementType == typeof(string)){
+                else if (elementType == typeof(string)) {
                     result = Encoding.UTF32.GetString(array).Split('\0').Cast<T>().ToArray();
                 }
-                else{
-                    if (BytesToArrayMethod == null) throw new NullReferenceException("The BytesToArrayMethod delegate is null. You must set it before using this method.");
-
-                    result = BytesToArrayMethod(array, destroyArray);
+                else {
+                    throw new ArgumentNullException(nameof(bytesToArrayMethod), "Type not supported by default. Please provide a custom method for BytesToArray.");
                 }
 
-                if (destroyArray) SecureData.OverwriteArray();
+                if (destroyArray) OverwriteArray(array);
 
                 return result;
+            }
+
+            private static byte[] PerformCryptography(byte[] data, ICryptoTransform cryptoTransform) {
+                using var ms = new MemoryStream(data.Length);
+
+                using (var cryptoStream = new CryptoStream(ms, cryptoTransform, CryptoStreamMode.Write)) {
+                    cryptoStream.Write(data, 0, data.Length);
+                    cryptoStream.FlushFinalBlock();
+                }
+
+                return ms.ToArray();
             }
 
         #endregion
 
+        #region Getters
+
+            public int GetLength() {
+                try {
+                    Lock(this);
+                    return length;
+                }
+                finally {
+                    Unlock(this);
+                }
+            }
+
+            public T[] GetData() {
+                try {
+                    Lock(this);
+
+                    if (cache != null) {
+                        StartCacheTimer();
+                        return cache.ToArray();
+                    }
+
+                    if (!Sha512Instance.ComputeHash(data.ToArray()).SequenceEqual(hash.ToArray()))
+                        throw new InvalidDataHash("Data has been modified in a potentially malicious way.");
+
+                    byte[] decData;
+
+                    AesInstance.Key = key.Span.ToArray();
+                    AesInstance.IV = iv.Span.ToArray();
+
+                    using (var decryptor = AesInstance.CreateDecryptor(AesInstance.Key, AesInstance.IV)) {
+                        decData = PerformCryptography(data.ToArray(), decryptor);
+                    }
+
+                    AesInstance.Key = ZeroBuffer;
+                    AesInstance.IV = ZeroBuffer;
+
+                    cache = BytesToArray(decData, false);
+
+                    return cache.ToArray();
+                }
+                finally {
+                    Unlock(this);
+                }
+            }
+
+        #endregion
+
+        #region Setters
+
+            public void SetData(T[] value) {
+                Lock(this);
+
+                if (isReadOnly) throw new ReadOnlyException("The SecurePointer is read-only.");
+
+                length = value.Length;
+
+                GenerateKeyIv();
+
+                AesInstance.Key = key.Span.ToArray();
+                AesInstance.IV = iv.Span.ToArray();
+
+                using (var encryptor = AesInstance.CreateEncryptor(AesInstance.Key, AesInstance.IV)) {
+                    data = new Memory<byte>(PerformCryptography(ArrayToBytes(value, false), encryptor));
+                }
+
+                AesInstance.Key = ZeroBuffer;
+                AesInstance.IV = ZeroBuffer;
+
+                hash = new Memory<byte>(Sha512Instance.ComputeHash(data.ToArray()));
+
+                Unlock(this);
+            }
+
+            public void SetArrayToBytesMethod(ClassArrayToBytes<T> method) {
+                Lock(this);
+
+                arrayToBytesMethod = method;
+
+                Unlock(this);
+            }
+
+            public void SetBytesToArrayMethod(ClassBytesToArray<T> method) {
+                Lock(this);
+
+                bytesToArrayMethod = method;
+
+                Unlock(this);
+            }
+
+        #endregion
     }
 }

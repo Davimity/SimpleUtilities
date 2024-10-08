@@ -1,41 +1,41 @@
-﻿using SimpleUtilities.Exceptions.SecurityExceptions.CryptographycExceptions;
-using SimpleUtilities.Security.SecureInformation.Types;
+﻿using System.Text;
 using System.Security.Cryptography;
-using System.Text;
 
-using SecureString = SimpleUtilities.Security.SecureInformation.Types.SecureString;
+using SimpleUtilities.Security.SecureInformation;
 
-namespace SimpleUtilities.Security.Cryptography
-{
-    public static class AES{
+using SAes = System.Security.Cryptography.Aes;
+using SecureString = SimpleUtilities.Security.SecureInformation.Types.Texts.SecureString;
+
+namespace SimpleUtilities.Security.Cryptography {
+    ///<summary>Provides methods for AES encryption and decryption.</summary>
+    ///<remarks>THREAD SAFE</remarks>
+    public static class Aes{
+
+        private static readonly ThreadLocal<SAes> AesInstance = new(SAes.Create);
 
         /// <summary> Encrypts a string using AES encryption </summary>
         /// <param name="input"> The string to encrypt </param>
         /// <param name="iv"> The initialization vector. Length must be 16 bytes </param>
         /// <param name="key"> The key. Length must be 32 bytes (256 bits) </param>
         /// <returns> The encrypted string </returns>
-        public static string AESEncrypt(string input, byte[] key, byte[] iv){
+        public static string Encrypt(string input, byte[] key, byte[] iv){
+            
+            var aes = AesInstance.Value ?? throw new NullReferenceException("aes is null");
 
-            if (key == null || key.Length != 32)
-                throw new ArgumentException("Key length must be 32 bytes (256 bits).");
-            if (iv == null || iv.Length != 16)
-                throw new ArgumentException("IV length must be 16 bytes.");
+            aes.Key = key;
+            aes.IV = iv;
 
-            using (Aes aes = Aes.Create()){
-                aes.Key = key;
-                aes.IV = iv;
-
-                ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
-
-                using (MemoryStream ms = new MemoryStream()){
-                    using (CryptoStream cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write)){
-                        using (StreamWriter sw = new StreamWriter(cs)){
-                            sw.Write(input);
-                        }
+            var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
+            using (var ms = new MemoryStream()) {
+                using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write)) {
+                    using (var sw = new StreamWriter(cs)) {
+                        sw.Write(input);
                     }
-                    return Convert.ToBase64String(ms.ToArray());
                 }
+
+                return Convert.ToBase64String(ms.ToArray());
             }
+            
         }
 
         /// <summary> Encrypts a byte array using AES encryption </summary>
@@ -43,26 +43,21 @@ namespace SimpleUtilities.Security.Cryptography
         /// <param name="key"> The key. Length must be 32 bytes (256 bits) </param>
         /// <param name="iv"> The initialization vector. Length must be 16 bytes </param>
         /// <returns> The encrypted byte array </returns>
-        public static byte[] AESEncrypt(byte[] input, byte[] key, byte[] iv){
+        public static byte[] Encrypt(byte[] input, byte[] key, byte[] iv) {
 
-            if (key == null || key.Length != 32)
-                throw new ArgumentException("Key length must be 32 bytes (256 bits).");
-            if (iv == null || iv.Length != 16)
-                throw new ArgumentException("IV length must be 16 bytes.");
+            var aes = AesInstance.Value ?? throw new NullReferenceException("aes is null");
 
-            using (Aes aes = Aes.Create()){
-                aes.Key = key;
-                aes.IV = iv;
+            aes.Key = key;
+            aes.IV = iv;
 
-                ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
-
-                using (MemoryStream ms = new MemoryStream()){
-                    using (CryptoStream cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write)){
-                        cs.Write(input, 0, input.Length);
-                        cs.FlushFinalBlock();
-                    }
-                    return ms.ToArray();
+            var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
+            using (var ms = new MemoryStream()) {
+                using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write)) {
+                    cs.Write(input, 0, input.Length);
+                    cs.FlushFinalBlock();
                 }
+
+                return ms.ToArray();
             }
         }
 
@@ -71,62 +66,46 @@ namespace SimpleUtilities.Security.Cryptography
         /// <param name="key"> The key. Length must be 32 bytes (256 bits) </param>
         /// <param name="iv"> The initialization vector. Length must be 16 bytes </param>
         /// <returns> The encrypted SecureString </returns>
-        public static SecureString AESEncrypt(SecureString input, byte[] key, byte[] iv){
-            if (key == null || key.Length != 32)
-                throw new ArgumentException("Key length must be 32 bytes (256 bits).");
-            if (iv == null || iv.Length != 16)
-                throw new ArgumentException("IV length must be 16 bytes.");
+        public static SecureString Encrypt(SecureString input, byte[] key, byte[] iv) {
 
-            using (Aes aes = Aes.Create()){
-                aes.Key = key;
-                aes.IV = iv;
+            var aes = AesInstance.Value ?? throw new NullReferenceException("aes is null");
 
-                ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
+            aes.Key = key;
+            aes.IV = iv;
 
-                using (MemoryStream ms = new MemoryStream()){
-                    using (CryptoStream cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write)){
-                        byte[] bytes = input.ToBytes();
+            var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
+            using (var ms = new MemoryStream()) {
+                using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write)) {
+                    var b = input.ToBytes();
 
-                        cs.Write(bytes, 0, bytes.Length);
-                        cs.FlushFinalBlock();
+                    cs.Write(b, 0, b.Length);
+                    cs.FlushFinalBlock();
 
-                        SecureData.OverwriteArray(bytes);
-                    }
-
-                    return new SecureString(ms.ToArray());
+                    SecureData.OverwriteArray(b);
                 }
+
+                return new SecureString(input.GetEncoding().GetBytes(Convert.ToBase64String(ms.ToArray())));
             }
         }
 
+
         /// <summary> Decrypts a string using AES encryption </summary>
-        /// <param> The string to decrypt </param>
-        /// <param> The initialization vector. Length must be 16 bytes </param>
-        /// <param> The key. Length must be 32 bytes (256 bits) </param>
+        /// <param name="input"> The string to decrypt </param>
+        /// <param name="key"> The initialization vector. Length must be 16 bytes </param>
+        /// <param name="iv"> The key. Length must be 32 bytes (256 bits) </param>
         /// <return> The decrypted string </return>
-        public static string AESDecrypt(string input, byte[] key, byte[] iv){
+        public static string Decrypt(string input, byte[] key, byte[] iv) {
 
-            if (key == null || key.Length != 32)
-                throw new ArgumentException("Key length must be 32 bytes (256 bits).");
-            if (iv == null || iv.Length != 16)
-                throw new ArgumentException("IV length must be 16 bytes.");
+            var aes = AesInstance.Value ?? throw new NullReferenceException("aes is null");
 
-            using (Aes aes = Aes.Create()){
+            aes.Key = key;
+            aes.IV = iv;
 
-                aes.Key = key;
-                aes.IV = iv;
-
-                ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
-
-                using (MemoryStream ms = new MemoryStream(Convert.FromBase64String(input))){
-                    using (CryptoStream cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read)){
-                        using (StreamReader sr = new StreamReader(cs)){
-                            try{
-                                return sr.ReadToEnd();
-                            }
-                            catch (Exception e){
-                                throw new AESDecryptException("Error decrypting the SecureString. Error message: " + e.Message);
-                            }         
-                        }
+            var decryptor = aes.CreateDecryptor();
+            using (var ms = new MemoryStream(Convert.FromBase64String(input))) {
+                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read)) {
+                    using (var sr = new StreamReader(cs)) {
+                        return sr.ReadToEnd();
                     }
                 }
             }
@@ -134,199 +113,223 @@ namespace SimpleUtilities.Security.Cryptography
 
         /// <summary> Decrypts a byte array using AES encryption </summary>
         /// <param name="input"> The byte array to encrypt </param>
-        /// <param> The initialization vector. Length must be 16 bytes </param>
-        /// <param> The key. Length must be 32 bytes (256 bits) </param>
+        /// <param name="key"> The initialization vector. Length must be 16 bytes </param>
+        /// <param name="iv"> The key. Length must be 32 bytes (256 bits) </param>
         /// <returns> The decrypted byte array </returns>
-        public static byte[] AESDecrypt(byte[] input, byte[] key, byte[] iv){
+        public static byte[] Decrypt(byte[] input, byte[] key, byte[] iv) {
 
-            if (key == null || key.Length != 32)
-                throw new ArgumentException("Key length must be 32 bytes (256 bits).");
-            if (iv == null || iv.Length != 16)
-                throw new ArgumentException("IV length must be 16 bytes.");
+            var aes = AesInstance.Value ?? throw new NullReferenceException("aes is null");
 
-            using (Aes aes = Aes.Create()){
+            aes.Key = key;
+            aes.IV = iv;
 
-                aes.Key = key;
-                aes.IV = iv;
+            var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
 
-                ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
-
-                using (MemoryStream ms = new MemoryStream(input)){
-                    using (CryptoStream cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read)){
-                        using (MemoryStream msOut = new MemoryStream()){
-                            cs.CopyTo(msOut);
-                            return msOut.ToArray();
-                        }
+            using (var ms = new MemoryStream(input)) {
+                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read)) {
+                    using (var msOut = new MemoryStream()) {
+                        cs.CopyTo(msOut);
+                        return msOut.ToArray();
                     }
                 }
             }
-
         }
 
         /// <summary> Decrypts a SecureString using AES encryption </summary>
         /// <param name="input"> TheSecureString to encrypt </param>
-        /// <param> The initialization vector. Length must be 16 bytes </param>
-        /// <param> The key. Length must be 32 bytes (256 bits) </param>
+        /// <param name="key"> The initialization vector. Length must be 16 bytes </param>
+        /// <param name="iv"> The key. Length must be 32 bytes (256 bits) </param>
         /// <returns> The decrypted SecureString </returns>
-        public static SecureString AESDecrypt(SecureString input, byte[] key, byte[] iv){
-            if (key == null || key.Length != 32)
-                throw new ArgumentException("Key length must be 32 bytes (256 bits).");
-            if (iv == null || iv.Length != 16)
-                throw new ArgumentException("IV length must be 16 bytes.");
-
-            using (Aes aes = Aes.Create())
-            {
-
+        public static SecureString Decrypt(SecureString input, byte[] key, byte[] iv) {
+            using (var aes = SAes.Create()) {
                 aes.Key = key;
                 aes.IV = iv;
 
-                ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
+                var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
 
-                byte[] bytes = input.ToBytes();
-
-                using (MemoryStream ms = new MemoryStream(bytes))
-                {
-                    using (CryptoStream cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
-                    {
-                        using (MemoryStream msOut = new MemoryStream())
-                        {
+                using (var ms = new MemoryStream(Convert.FromBase64String(input))) {
+                    using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read)) {
+                        using (var msOut = new MemoryStream()) {
                             cs.CopyTo(msOut);
-                            SecureData.OverwriteArray(bytes);
                             return new SecureString(msOut.ToArray());
                         }
                     }
                 }
             }
-
         }
+
 
         /// <summary> Generates a key for AES encryption </summary>
         /// <param name="input"> The input string </param>
         /// <param name="salt"> The salt string </param>
+        /// <param name="iterations"> The number of iterations to generate the key </param>
         /// <returns> The generated key </returns>
-        public static byte[] GenerateKey(string input, string salt){
+        public static byte[] GenerateKey(string input, string salt, int iterations = 0) {
+            var bSalt = Encoding.UTF8.GetBytes(salt);
 
-            string combinedInput = input + salt;
-            byte[] bSalt = Encoding.UTF8.GetBytes(salt);
+            try {
+                var rinput = Sha512.Hash(input, salt);
 
-            int iterations;
+                if (iterations <= 0) {
+                    using (var sha = SHA256.Create())
+                    {
+                        var hash = sha.ComputeHash(bSalt);
+                        iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
+                        iterations = 10000 + (iterations % 90000);
+                    }
+                }
 
-            using(SHA256 sha = SHA256.Create()){
-                byte[] hash = sha.ComputeHash(bSalt);
-                iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
-                iterations = 10000 + (iterations % 90000);
+                using (var deriveBytes = new Rfc2898DeriveBytes(rinput, bSalt, iterations, HashAlgorithmName.SHA512))
+                {
+                    return deriveBytes.GetBytes(32);
+                }
             }
-
-            byte[] key;
-
-            using (var deriveBytes = new Rfc2898DeriveBytes(combinedInput, bSalt, iterations, HashAlgorithmName.SHA512)){
-                key = deriveBytes.GetBytes(32); // AES-256 key size
+            finally {
+                SecureData.OverwriteArray(bSalt);
             }
-
-            return key;
-        }
-
-        /// <summary> Generates an initialization vector for AES encryption </summary>
-        /// <param name="input"> The input string </param>
-        /// <param name="salt"> The salt string </param>
-        /// <returns> The generated IV </returns>
-        public static byte[] GenerateIV(string input, string salt){
-
-            string combinedInput = input + salt;
-            byte[] bSalt = Encoding.UTF8.GetBytes(salt);
-
-            int iterations;
-
-            using (SHA256 sha = SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(bSalt);
-                iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
-                iterations = 10000 + (iterations % 90000);
-            }
-
-            byte[] iv;
-
-            using (var deriveBytes = new Rfc2898DeriveBytes(combinedInput, bSalt, iterations, HashAlgorithmName.SHA512)){
-                iv = deriveBytes.GetBytes(16); // AES-128 IV size
-            }
-
-            return iv;
         }
 
         /// <summary> Generates a key for AES encryption </summary>
         /// <param name="input"> The input SecureString </param>
         /// <param name="salt"> The salt SecureString </param>
+        /// <param name="iterations"> The number of iterations to generate the key </param>
         /// <returns> The generated key </returns>
-        public static byte[] GenerateKey(SecureString input, SecureString salt){
+        public static byte[] GenerateKey(SecureString input, SecureString salt, int iterations = 0) {
+            var bSalt = salt.ToBytes();
 
-            SecureString combinedInput = new SecureString();
+            try {
+                var rinput = Sha512.Hash(input, salt);
 
-            combinedInput.Append(input);
-            combinedInput.Append(salt);
+                if (iterations <= 0) {
+                    using (var sha = SHA256.Create()) {
+                        var hash = sha.ComputeHash(bSalt);
+                        iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
+                        iterations = 10000 + (iterations % 90000);
+                    }
+                }
 
-            byte[] bSalt = salt.ToBytes();
-
-            int iterations;
-
-            using (SHA256 sha = SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(bSalt);
-                iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
-                iterations = 10000 + (iterations % 90000);
+                using (var deriveBytes = new Rfc2898DeriveBytes(rinput, bSalt, iterations, HashAlgorithmName.SHA512)) {
+                    return deriveBytes.GetBytes(32);
+                }
+            }finally {
+                SecureData.OverwriteArray(bSalt);
             }
+        }
 
-            byte[] key;
+        /// <summary> Generates a key for AES encryption </summary>
+        /// <param name="input"> The input byte[] </param>
+        /// <param name="salt"> The salt byte[] </param>
+        /// <param name="iterations"> The number of iterations to generate the key </param>
+        /// <param name="destroyInputs"> True to destroy input and salt arrays after use </param>
+        /// <returns> The generated key </returns>
+        public static byte[] GenerateKey(byte[] input, byte[] salt, int iterations = 0, bool destroyInputs = false) {
+            try {
+                var rinput = Sha512.Hash(input, salt);
 
-            string str = combinedInput.ToString();
+                if (iterations <= 0) {
+                    using (var sha = SHA256.Create()) {
+                        var hash = sha.ComputeHash(salt);
+                        iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
+                        iterations = 10000 + (iterations % 90000);
+                    }
+                }
 
-            using (var deriveBytes = new Rfc2898DeriveBytes(str, bSalt, iterations, HashAlgorithmName.SHA512)){
-                key = deriveBytes.GetBytes(32); // AES-256 key size
+                using (var deriveBytes = new Rfc2898DeriveBytes(rinput, salt, iterations, HashAlgorithmName.SHA512)) {
+                    return deriveBytes.GetBytes(32);
+                }
             }
+            finally {
+                if(destroyInputs) {
+                    SecureData.OverwriteArray(input);
+                    SecureData.OverwriteArray(salt);
+                }
+            }
+        }
 
-            SecureData.OverwriteString(str);
-            SecureData.OverwriteArray(bSalt);
 
-            combinedInput.Dispose();
+        /// <summary> Generates an initialization vector for AES encryption </summary>
+        /// <param name="input"> The input string </param>
+        /// <param name="salt"> The salt string </param>
+        /// <param name="iterations"> The number of iterations to generate the IV </param>
+        /// <returns> The generated IV </returns>
+        public static byte[] GenerateIv(string input, string salt, int iterations = 0) {
+            var bSalt = Encoding.UTF8.GetBytes(salt);
 
-            return key;
+            try {
+                var rinput = Sha512.Hash(input, salt);
+                
+                if (iterations <= 0) {
+                    using (var sha = SHA256.Create()) {
+                        var hash = sha.ComputeHash(bSalt);
+                        iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
+                        iterations = 10000 + (iterations % 90000);
+                    }
+                }
+
+                using (var deriveBytes = new Rfc2898DeriveBytes(rinput, bSalt, iterations, HashAlgorithmName.SHA512)) {
+                    return deriveBytes.GetBytes(16);
+                }
+            }finally {
+                SecureData.OverwriteArray(bSalt);
+            }
         }
 
         /// <summary> Generates an initialization vector for AES encryption </summary>
         /// <param name="input"> The input SecureString </param>
         /// <param name="salt"> The salt SecureString </param>
+        /// <param name="iterations"> The number of iterations to generate the IV </param>
         /// <returns> The generated IV </returns>
-        public static byte[] GenerateIV(SecureString input, SecureString salt){
+        public static byte[] GenerateIv(SecureString input, SecureString salt, int iterations = 0) {
+            var bSalt = salt.ToBytes();
 
-            SecureString combinedInput = new SecureString();
+            try {
+                var rinput = Sha512.Hash(input, salt);
 
-            combinedInput.Append(input);
-            combinedInput.Append(salt);
+                if (iterations <= 0) {
+                    using (var sha = SHA256.Create()) {
+                        var hash = sha.ComputeHash(bSalt);
+                        iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
+                        iterations = 10000 + (iterations % 90000);
+                    }
+                }
 
-            byte[] bSalt = salt.ToBytes();
-
-            int iterations;
-
-            using (SHA256 sha = SHA256.Create()){
-                byte[] hash = sha.ComputeHash(bSalt);
-                iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
-                iterations = 10000 + (iterations % 90000);
+                using (var deriveBytes = new Rfc2898DeriveBytes(rinput, bSalt, iterations, HashAlgorithmName.SHA512)) {
+                    return deriveBytes.GetBytes(16);
+                }
             }
-
-            byte[] iv;
-
-            string str = combinedInput.ToString();
-
-            using (var deriveBytes = new Rfc2898DeriveBytes(str, bSalt, iterations, HashAlgorithmName.SHA512)){
-                iv = deriveBytes.GetBytes(16); // AES-128 IV size
+            finally {
+                SecureData.OverwriteArray(bSalt);
             }
-
-            SecureData.OverwriteString(str);
-            SecureData.OverwriteArray(bSalt);
-
-            combinedInput.Dispose();
-
-            return iv;
         }
 
+        /// <summary> Generates an initialization vector for AES encryption </summary>
+        /// <param name="input"> The input byte[] </param>
+        /// <param name="salt"> The salt byte[] </param>
+        /// <param name="iterations"> The number of iterations to generate the IV </param>
+        /// <param name="destroyInputs"> True to destroy input and salt arrays after use </param>
+        /// <returns> The generated IV </returns>
+        public static byte[] GenerateIv(byte[] input, byte[] salt, int iterations = 0, bool destroyInputs = false) {
+            try {
+                var rinput = Sha512.Hash(input, salt);
+
+                if (iterations <= 0) {
+                    using (var sha = SHA256.Create()) {
+                        var hash = sha.ComputeHash(salt);
+                        iterations = BitConverter.ToInt32(hash, 0) & 0x7FFFFFFF;
+                        iterations = 10000 + (iterations % 90000);
+                    }
+                }
+
+                using (var deriveBytes = new Rfc2898DeriveBytes(rinput, salt, iterations, HashAlgorithmName.SHA512)) {
+                    return deriveBytes.GetBytes(16);
+                }
+            }
+            finally {
+                if (destroyInputs) {
+                    SecureData.OverwriteArray(input);
+                    SecureData.OverwriteArray(salt);
+                }
+            }
+        }
     }
 }

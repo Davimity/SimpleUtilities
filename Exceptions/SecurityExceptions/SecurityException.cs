@@ -1,7 +1,4 @@
-﻿using System;
-
-namespace SimpleUtilities.Exceptions.SecurityExceptions{
-    public class SecurityException : Exception{
-        public SecurityException(string message) : base(message) { }
+﻿namespace SimpleUtilities.Exceptions.SecurityExceptions{
+    public class SecurityException(string message) : Exception(message){
     }
 }

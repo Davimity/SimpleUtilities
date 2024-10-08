@@ -1,8 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "z4HTa4v3i/k=",
+  "dgSpecHash": "OJYT5xozO2Q=",
   "success": true,
   "projectFilePath": "C:\\Users\\Lubia\\Desktop\\SimpleUtilities\\SimpleUtilities.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\Lubia\\.nuget\\packages\\identitymodel\\7.0.0\\identitymodel.7.0.0.nupkg.sha512",
+    "C:\\Users\\Lubia\\.nuget\\packages\\identitymodel.oidcclient\\6.0.0\\identitymodel.oidcclient.6.0.0.nupkg.sha512",
+    "C:\\Users\\Lubia\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\8.0.0\\microsoft.extensions.dependencyinjection.abstractions.8.0.0.nupkg.sha512",
+    "C:\\Users\\Lubia\\.nuget\\packages\\microsoft.extensions.logging.abstractions\\8.0.0\\microsoft.extensions.logging.abstractions.8.0.0.nupkg.sha512"
+  ],
   "logs": []
 }

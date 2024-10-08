@@ -1,4 +1,4 @@
-﻿using SimpleUtilities.Threading;
+﻿using static SimpleUtilities.Threading.SimpleLock;
 
 using File = SimpleUtilities.Utilities.Files.File;
 
@@ -11,8 +11,6 @@ namespace SimpleUtilities.Utilities.Configurations{
             private Dictionary<string, string> config;
 
             private char equalSymbol;
-
-            private object lockObject;
 
         #endregion
 
@@ -28,8 +26,6 @@ namespace SimpleUtilities.Utilities.Configurations{
                 equalSymbol = '=';
 
                 LoadConfig();
-
-                lockObject = new object();
             }
 
         #endregion
@@ -37,43 +33,54 @@ namespace SimpleUtilities.Utilities.Configurations{
         #region Methods
 
             private void LoadConfig(){
-                using(new SimpleLock(lockObject)){
-                    string[] lines = File.Read(configPath);
+               try {
+                    Lock(this);
+                    var lines = File.Read(configPath);
 
-                    foreach (string line in lines)
-                    {
-                        string[] parts = line.Split(equalSymbol);
+                    foreach (var line in lines) {
+                        var parts = line.Split(equalSymbol);
                         if (parts.Length != 2) continue;
                         config.Add(parts[0], parts[1]);
                     }
-                }
+               }finally{ 
+                   Unlock(this);
+               }
             }
 
             public string? GetValue(string key){
-                using (new SimpleLock(lockObject)){
-                    return config.ContainsKey(key) ? config[key] : null;
+                try {
+                    Lock(this);
+                    return config.GetValueOrDefault(key);
+                }finally {
+                    Unlock(this);
                 }
             }
 
             public void SetValue(string key, string value){
-                using (new SimpleLock(lockObject)){
+                try {
+                    Lock(this);
                     if (config.ContainsKey(key)) config[key] = value;
                     else config.Add(key, value);
-
                     SaveConfig();
+                }
+                finally {
+                    Unlock(this);
                 }
             }
 
             public void SaveConfig(){
-                using (new SimpleLock(lockObject)){
-                    string[] lines = new string[config.Count];
-                    int i = 0;
-                    foreach (KeyValuePair<string, string> pair in config){
-                        lines[i] = pair.Key + "=" + pair.Value;
-                        i++;
-                    }
-                    File.Write(configPath, lines, false, false);
-                }
+               try { 
+                   Lock(this);
+                   var lines = new string[config.Count];
+                   var i = 0;
+                   foreach (var pair in config){
+                       lines[i] = pair.Key + "=" + pair.Value;
+                       i++;
+                   }
+                   File.Write(configPath, lines, false, false);
+               }finally{ 
+                   Unlock(this);
+               }
             }
 
         #endregion
